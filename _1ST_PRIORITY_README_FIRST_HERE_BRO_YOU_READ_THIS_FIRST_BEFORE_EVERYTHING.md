@@ -49,5 +49,5 @@ This is for the file Andrice_RTH_Sessions_v1.2.jar
 This file is a Motivewvae Indicator for genereating a csv file that will contain this .csv : date,open,high,low,close,volume,lod_time,hod_time
 you should always update your converted csv file for the rth sessions to the latest session
 
-G)This is for the file 
+G)This is for the file Andrice_Levels_v2.1 
 this is a pine script code for a Trading View Indicator when you paste the levels that the 02_calculate python code return it will automatically plot the areas needed 
