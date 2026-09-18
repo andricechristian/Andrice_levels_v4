@@ -1,6 +1,8 @@
 """
 README_FIRST
 
+Make yourself a service please read this fisrt
+
 A)
 This is for the file ANDRICE_LEVELS_v4 python code
 
@@ -41,3 +43,11 @@ here's what the convertion is looking like :
 what you import  .csv: date,time,open,high,low,close,volume 
 it convert it to .csv: Session,Date,O_RTH,H_RTH,L_RTH,C_RTH,HOD_Time,LOD_Time,Extreme_First,PUV_Points,PDV_Points,PUV_Percent,PDV_Percent,RTH_Range_Points,Calendar_Days_Since_Previous_Complete,ATR_Sequence_Reset,Previous_Complete_RTH_Close,TR_RTH,ATR14_Previous,ATR14_End,PUV_ATR,PDV_ATR,RTH_Volume,Bar_Count,Duplicate_Bars
 """
+
+F)
+This is for the file Andrice_RTH_Sessions_v1.2.jar 
+This file is a Motivewvae Indicator for genereating a csv file that will contain this .csv : date,open,high,low,close,volume,lod_time,hod_time
+you should always update your converted csv file for the rth sessions to the latest session
+
+G)This is for the file 
+this is a pine script code for a Trading View Indicator when you paste the levels that the 02_calculate python code return it will automatically plot the areas needed 
