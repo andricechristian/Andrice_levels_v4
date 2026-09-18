@@ -1,0 +1,144 @@
+//@version=6
+indicator("Andrice Levels - Paste Report v2.1", overlay = true, max_lines_count = 128, max_boxes_count = 64, max_labels_count = 64, behind_chart = false)
+
+report = input.text_area("", "Paste your levels report here", group = "Report", confirm = true, tooltip = "Paste POINTS LEVELS, PERCENTAGE LEVELS or ATR LEVELS and their named ranges. Several blocks are allowed. Values must already be absolute chart prices. Boundary SE notes are ignored. Multiple levels per line and wrapped names are supported.")
+showMean = input.bool(true, "MeanSE zones", group = "Visible zones")
+showQuartile = input.bool(true, "P25_P75 zones", group = "Visible zones")
+showTail = input.bool(true, "P10_P90 zones", group = "Visible zones")
+showQ90 = input.bool(true, "Q90 envelope", group = "Visible zones")
+showQ95 = input.bool(true, "Q95 envelope", group = "Visible zones")
+showPoints = input.bool(true, "Points blocks", group = "Visible zones")
+showPercent = input.bool(true, "Percentage blocks", group = "Visible zones")
+showATR = input.bool(true, "ATR blocks", group = "Visible zones")
+windowMode = input.string("Recent bars", "Drawing window", options = ["Recent bars", "Custom dates"], group = "Display")
+barsBack = input.int(150, "Bars left", minval = 1, maxval = 9000, group = "Display")
+barsAhead = input.int(15, "Bars right / label offset", minval = 1, maxval = 200, group = "Display")
+extendRight = input.bool(true, "Extend right (Recent bars only)", group = "Display")
+startTime = input.time(timestamp("10 Sep 2026 09:30 -0400"), "Custom start", group = "Display")
+endTime = input.time(timestamp("10 Sep 2026 16:00 -0400"), "Custom end", group = "Display")
+showLabels = input.bool(true, "Show descriptions", group = "Display")
+showPrices = input.bool(true, "Show bounds in descriptions", group = "Display")
+showBlock = input.bool(true, "Include block heading in descriptions", group = "Display")
+showStatus = input.bool(true, "Show parsing status", group = "Display")
+fillTransparency = input.int(85, "Zone transparency", minval = 0, maxval = 100, group = "Display")
+envelopeTransparency = input.int(95, "Envelope transparency", minval = 0, maxval = 100, group = "Display")
+hodColor = input.color(color.teal, "HOD color", group = "Display")
+lodColor = input.color(color.orange, "LOD color", group = "Display")
+envelopeColor = input.color(color.purple, "Envelope color", group = "Display")
+textSize = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = "Display")
+
+var array<float> bottoms = array.new<float>()
+var array<float> tops = array.new<float>()
+var array<string> names = array.new<string>()
+var array<color> inks = array.new<color>()
+var array<int> transparencies = array.new<int>()
+var array<box> boxes = array.new<box>()
+var array<line> upperLines = array.new<line>()
+var array<line> lowerLines = array.new<line>()
+var array<label> labels = array.new<label>()
+var int recognized = 0
+var int ignored = 0
+var table status = table.new(position.top_right, 1, 1)
+
+priceText(float value) =>
+    str.tostring(value, "0.00########")
+
+if barstate.isfirst
+    string heading = "Levels"
+    int family = 0
+    // Normalize layout BEFORE splitting records: copied PDF/notebook text can
+    // join several levels or wrap HOD and MeanSE onto different lines.
+    normalized = str.upper(report)
+    normalized := str.replace_all(normalized, "\r", " ")
+    normalized := str.replace_all(normalized, "\n", " ")
+    normalized := str.replace_all(normalized, "\t", " ")
+    normalized := str.replace_all(normalized, " ", " ")
+    normalized := str.replace_all(normalized, " ", " ")
+    while str.contains(normalized, "  ")
+        normalized := str.replace_all(normalized, "  ", " ")
+    // Insert record boundaries BEFORE discarding any | commentary.
+    // Otherwise the next zone on the same physical line would be lost.
+    tokens = array.from("POINTS LEVELS", "PERCENTAGE LEVELS", "ATR LEVELS", "HOD MEANSE", "HOD P25_P75", "HOD P10_P90", "LOD MEANSE", "LOD P25_P75", "LOD P10_P90", "Q90 ENVELOPE", "Q95 ENVELOPE")
+    for token in tokens
+        normalized := str.replace_all(normalized, token, "\n" + token)
+    rows = str.split(normalized, "\n")
+    for [i, rawRow] in rows
+        row = str.trim(rawRow)
+        upperRow = str.upper(row)
+        if str.startswith(upperRow, "POINTS LEVELS") or str.startswith(upperRow, "PERCENTAGE LEVELS") or str.startswith(upperRow, "ATR LEVELS")
+            heading := row
+            family := str.startswith(upperRow, "POINTS") ? 1 : str.startswith(upperRow, "PERCENTAGE") ? 2 : 3
+        else if str.length(row) > 0
+            parts = str.split(row, ":")
+            name = str.replace_all(str.replace_all(str.trim(array.get(parts, 0)), "MEANSE", "MeanSE"), "ENVELOPE", "envelope")
+            key = str.upper(name)
+            isHOD = key == "HOD MEANSE" or key == "HOD P25_P75" or key == "HOD P10_P90"
+            isLOD = key == "LOD MEANSE" or key == "LOD P25_P75" or key == "LOD P10_P90"
+            isQ90 = key == "Q90 ENVELOPE"
+            isQ95 = key == "Q95 ENVELOPE"
+            known = isHOD or isLOD or isQ90 or isQ95
+            if known
+                if array.size(parts) < 2
+                    runtime.error("Missing colon/range on level record " + str.tostring(i + 1) + ": " + row)
+                // Read only the price range before the first |; ignore SE commentary.
+                rangeText = array.get(str.split(array.get(parts, 1), "|"), 0)
+                rangeText := str.replace_all(str.replace_all(str.replace_all(rangeText, "–", "-"), "—", "-"), "−", "-")
+                rangeText := str.replace_all(str.replace_all(str.replace_all(rangeText, ",", ""), " ", ""), "\t", "")
+                bounds = str.split(rangeText, "-")
+                if array.size(bounds) != 2
+                    runtime.error("Expected two positive prices separated by a dash in record " + str.tostring(i + 1) + ": " + row)
+                a = str.tonumber(array.get(bounds, 0))
+                b = str.tonumber(array.get(bounds, 1))
+                if na(a) or na(b) or a <= 0 or b <= 0 or a == b
+                    runtime.error("Invalid or equal zone prices in record " + str.tostring(i + 1) + ": " + row)
+                recognized += 1
+                kindVisible = isQ90 ? showQ90 : isQ95 ? showQ95 : str.contains(key, "MEANSE") ? showMean : str.contains(key, "P25_P75") ? showQuartile : showTail
+                familyVisible = family == 1 ? showPoints : family == 2 ? showPercent : family == 3 ? showATR : true
+                if kindVisible and familyVisible
+                    if array.size(tops) >= 64
+                        runtime.error("Maximum 64 visible zones. Paste fewer blocks or disable some categories.")
+                    array.push(bottoms, math.min(a, b))
+                    array.push(tops, math.max(a, b))
+                    array.push(names, (showBlock ? heading + " | " : "") + name)
+                    array.push(inks, isHOD ? hodColor : isLOD ? lodColor : envelopeColor)
+                    array.push(transparencies, isQ90 or isQ95 ? envelopeTransparency : fillTransparency)
+            else
+                ignored += 1
+
+isCustom = windowMode == "Custom dates"
+if isCustom and startTime >= endTime
+    runtime.error("Custom start must precede Custom end.")
+leftX = isCustom ? startTime : math.max(0, bar_index - barsBack)
+rightX = isCustom ? endTime : bar_index + barsAhead
+location = isCustom ? xloc.bar_time : xloc.bar_index
+extension = not isCustom and extendRight ? extend.right : extend.none
+labelSize = textSize == "Tiny" ? size.tiny : textSize == "Normal" ? size.normal : size.small
+
+if barstate.islast
+    n = array.size(tops)
+    if n > 0
+        // Reverse source order: usual report envelopes first, MeanSE bands last.
+        for j = 0 to n - 1
+            i = n - 1 - j
+            topPrice = array.get(tops, i)
+            bottomPrice = array.get(bottoms, i)
+            ink = array.get(inks, i)
+            caption = array.get(names, i) + (showPrices ? " | " + priceText(bottomPrice) + " - " + priceText(topPrice) : "")
+            if array.size(boxes) <= j
+                array.push(boxes, box.new(left = leftX, top = topPrice, right = rightX, bottom = bottomPrice, xloc = location, extend = extension, border_color = ink, border_width = 1, bgcolor = color.new(ink, array.get(transparencies, i)), force_overlay = true))
+                array.push(upperLines, line.new(leftX, topPrice, rightX, topPrice, xloc = location, extend = extension, color = ink, force_overlay = true))
+                array.push(lowerLines, line.new(leftX, bottomPrice, rightX, bottomPrice, xloc = location, extend = extension, color = ink, force_overlay = true))
+                if showLabels
+                    array.push(labels, label.new(rightX, (topPrice + bottomPrice) / 2, caption, xloc = location, yloc = yloc.price, style = label.style_label_left, color = color.new(ink, 10), textcolor = color.white, size = labelSize, force_overlay = true))
+            else
+                box.set_lefttop(array.get(boxes, j), leftX, topPrice)
+                box.set_rightbottom(array.get(boxes, j), rightX, bottomPrice)
+                line.set_xy1(array.get(upperLines, j), leftX, topPrice)
+                line.set_xy2(array.get(upperLines, j), rightX, topPrice)
+                line.set_xy1(array.get(lowerLines, j), leftX, bottomPrice)
+                line.set_xy2(array.get(lowerLines, j), rightX, bottomPrice)
+                if showLabels
+                    label.set_xy(array.get(labels, j), rightX, (topPrice + bottomPrice) / 2)
+    if showStatus
+        message = str.length(str.trim(report)) == 0 ? "Andrice Levels: paste your report in Settings > Inputs." : "Andrice Levels | " + str.tostring(n) + " visible / " + str.tostring(recognized) + " parsed zones | " + str.tostring(ignored) + " other rows ignored"
+        table.cell(status, 0, 0, message, text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
